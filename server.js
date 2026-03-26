@@ -7,6 +7,7 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const requiredEnvVars = ['MONGO_URI', 'JWT_SECRET'];
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS ||
   'http://localhost:3000,http://127.0.0.1:3000')
@@ -32,6 +33,8 @@ app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(async (req, res, next) => {
+  if (req.path === '/api/health') return next();
+
   try {
     await connectDB();
     next();
@@ -47,9 +50,6 @@ app.use('/api/couriers', require('./routes/couriers'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/tracking', require('./routes/tracking'));
 
-// Health check
-app.get('/api/health', (req, res) => res.json({ status: 'OK', message: 'SwiftRoute API running' }));
-
 // Error handler
 app.use((err, req, res, next) => {
   console.error(err.stack);
@@ -61,7 +61,14 @@ app.use((err, req, res, next) => {
 
 let connectPromise;
 
+const getMissingEnvVars = () => requiredEnvVars.filter(name => !process.env[name]);
+
 const connectDB = async () => {
+  const missingEnvVars = getMissingEnvVars();
+  if (missingEnvVars.length) {
+    throw new Error(`Missing required environment variables: ${missingEnvVars.join(', ')}`);
+  }
+
   if (!connectPromise) {
     connectPromise = mongoose.connect(process.env.MONGO_URI).then(async () => {
       console.log('✅ MongoDB Connected');
@@ -83,6 +90,23 @@ const connectDB = async () => {
 
   return connectPromise;
 };
+
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: mongoose.connection.readyState === 1 ? 'OK' : 'DEGRADED',
+    message: 'SwiftRoute API running',
+    database: {
+      connected: mongoose.connection.readyState === 1,
+      readyState: mongoose.connection.readyState
+    },
+    env: {
+      hasMongoUri: Boolean(process.env.MONGO_URI),
+      hasJwtSecret: Boolean(process.env.JWT_SECRET),
+      allowedOriginsConfigured: allowedOrigins
+    }
+  });
+});
 
 if (!process.env.VERCEL) {
   connectDB()
