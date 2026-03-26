@@ -6,12 +6,29 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 const app = express();
+const PORT = process.env.PORT || 5000;
+
+const allowedOrigins = (process.env.ALLOWED_ORIGINS ||
+  'http://localhost:3000,http://127.0.0.1:3000')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+
+const corsOptions = {
+  origin(origin, callback) {
+    // Allow server-to-server requests and local tools without an Origin header.
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  credentials: false,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
 
 // Middleware
-app.use(cors({
- origin: '*',
-  credentials: true
-}));
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -34,28 +51,45 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Connect to MongoDB and start server
-const PORT = process.env.PORT || 5000;
+let connectPromise;
 
-mongoose.connect(process.env.MONGO_URI)
-  .then(async () => {
-    console.log('✅ MongoDB Connected');
-    // Seed admin user if not exists
-    const User = require('./models/User');
-    const admin = await User.findOne({ role: 'admin' });
-    if (!admin) {
-      await User.create({
-        name: 'System Admin',
-        email: 'admin@swiftroute.com',
-        password: 'admin123',
-        phone: '9999999999',
-        role: 'admin'
-      });
-      console.log('👤 Admin seeded: admin@swiftroute.com / admin123');
-    }
-    app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-  })
-  .catch(err => {
-    console.error('❌ MongoDB connection error:', err.message);
-    process.exit(1);
-  });
+const connectDB = async () => {
+  if (!connectPromise) {
+    connectPromise = mongoose.connect(process.env.MONGO_URI).then(async () => {
+      console.log('✅ MongoDB Connected');
+
+      const User = require('./models/User');
+      const admin = await User.findOne({ role: 'admin' });
+      if (!admin) {
+        await User.create({
+          name: 'System Admin',
+          email: 'admin@swiftroute.com',
+          password: 'admin123',
+          phone: '9999999999',
+          role: 'admin'
+        });
+        console.log('👤 Admin seeded: admin@swiftroute.com / admin123');
+      }
+    });
+  }
+
+  return connectPromise;
+};
+
+connectDB().catch(err => {
+  console.error('❌ MongoDB connection error:', err.message);
+  if (!process.env.VERCEL) process.exit(1);
+});
+
+if (!process.env.VERCEL) {
+  connectDB()
+    .then(() => {
+      app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+    })
+    .catch(err => {
+      console.error('❌ MongoDB connection error:', err.message);
+      process.exit(1);
+    });
+}
+
+module.exports = app;
