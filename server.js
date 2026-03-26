@@ -31,6 +31,14 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
@@ -75,11 +83,6 @@ const connectDB = async () => {
 
   return connectPromise;
 };
-
-connectDB().catch(err => {
-  console.error('❌ MongoDB connection error:', err.message);
-  if (!process.env.VERCEL) process.exit(1);
-});
 
 if (!process.env.VERCEL) {
   connectDB()
